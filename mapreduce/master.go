@@ -29,10 +29,8 @@ type Master struct {
 	idleWorkerChan   chan *RemoteWorker
 	failedWorkerChan chan *RemoteWorker
 
-	///////////////////////////////
-	// ADD EXTRA PROPERTIES HERE //
-	///////////////////////////////
 	// Fault Tolerance
+	retryOperationChan chan *Operation
 }
 
 type Operation struct {
@@ -77,9 +75,19 @@ func (master *Master) acceptMultipleConnections() {
 
 // handleFailingWorkers will handle workers that fails during an operation.
 func (master *Master) handleFailingWorkers() {
-	/////////////////////////
-	// YOUR CODE GOES HERE //
-	/////////////////////////
+	var (
+		failedWorker *RemoteWorker
+	)
+
+	for failedWorker = range master.failedWorkerChan {
+
+		master.workersMutex.Lock()
+
+		log.Printf("Removing worker %v from master list.\n", failedWorker.id)
+		delete(master.workers, failedWorker.id)
+
+		master.workersMutex.Unlock()
+	}
 }
 
 // Handle a single connection until it's done, then closes it.

@@ -8,17 +8,16 @@ import (
 // Schedules map operations on remote workers. This will run until InputFilePathChan
 // is closed. If there is no worker available, it'll block.
 func (master *Master) schedule(task *Task, proc string, filePathChan chan string) int {
-	//////////////////////////////////
-	// YOU WANT TO MODIFY THIS CODE //
-	//////////////////////////////////
-
 	var (
-		wg        sync.WaitGroup
-		filePath  string
-		worker    *RemoteWorker
-		operation *Operation
-		counter   int
+		wg              sync.WaitGroup
+		filePath        string
+		worker          *RemoteWorker
+		operation       *Operation
+		failedOperation *Operation
+		counter         int
 	)
+
+	master.retryOperationChan = make(chan *Operation, RETRY_OPERATION_BUFFER)
 
 	log.Printf("Scheduling %v operations\n", proc)
 
@@ -32,7 +31,17 @@ func (master *Master) schedule(task *Task, proc string, filePathChan chan string
 		go master.runOperation(worker, operation, &wg)
 	}
 
+	go func() {
+		for failedOperation = range master.retryOperationChan {
+			log.Printf("Retrying operation %v...\n", failedOperation.id)
+
+			worker = <-master.idleWorkerChan
+			go master.runOperation(worker, failedOperation, &wg)
+		}
+	}()
+
 	wg.Wait()
+	close(master.retryOperationChan)
 
 	log.Printf("%vx %v operations completed\n", counter, proc)
 	return counter
@@ -40,10 +49,6 @@ func (master *Master) schedule(task *Task, proc string, filePathChan chan string
 
 // runOperation start a single operation on a RemoteWorker and wait for it to return or fail.
 func (master *Master) runOperation(remoteWorker *RemoteWorker, operation *Operation, wg *sync.WaitGroup) {
-	//////////////////////////////////
-	// YOU WANT TO MODIFY THIS CODE //
-	//////////////////////////////////
-
 	var (
 		err  error
 		args *RunArgs
@@ -56,8 +61,8 @@ func (master *Master) runOperation(remoteWorker *RemoteWorker, operation *Operat
 
 	if err != nil {
 		log.Printf("Operation %v '%v' Failed. Error: %v\n", operation.proc, operation.id, err)
-		wg.Done()
 		master.failedWorkerChan <- remoteWorker
+		master.retryOperationChan <- operation
 	} else {
 		wg.Done()
 		master.idleWorkerChan <- remoteWorker
